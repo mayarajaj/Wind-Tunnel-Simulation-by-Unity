@@ -9,14 +9,15 @@ public class Simulation3D : MonoBehaviour
 {
     //show Path mayar
 
-    //public bool showParticles = false;
+    public bool showParticles = false;
+    public bool showLines = true;
 
-    //public Color lineColor = Color.green;  // Color of the lines
-    //public int maxPositions = 50;  // Maximum number of positions to store
+    public Color lineColor = Color.green;  // Color of the lines
+    public int maxPositions = 20;  // Maximum number of positions to store
     
 
-    //private List<Queue<float3>> positionQueues;  // List of queues to store the positions of each particle
-    //private List<LineRenderer> lineRenderers;  // List of line renderers for each particle
+    private List<Queue<float3>> positionQueues;  // List of queues to store the positions of each particle
+    private List<LineRenderer> lineRenderers;  // List of line renderers for each particle
     //
 
 
@@ -34,6 +35,7 @@ public class Simulation3D : MonoBehaviour
     private float3[] float3MeshVertices;
     private bool isCollision;
     public float sphereRadius = 5f;
+    
     private int[] particlesShowArray;
     //
 
@@ -72,6 +74,11 @@ public class Simulation3D : MonoBehaviour
     public ComputeBuffer DensityBuffer { get; private set; }
     public ComputeBuffer predictedPositionsBuffer;
     public ComputeBuffer trianglesBuffer { get; private set; }
+    public ComputeBuffer Grid { get; private set; }
+    
+    public ComputeBuffer NextTriangle { get; private set; }
+    public ComputeBuffer TriangleGridIndices { get; private set; }
+
     ComputeBuffer spatialIndices;
     ComputeBuffer spatialOffsets;
 
@@ -82,7 +89,8 @@ public class Simulation3D : MonoBehaviour
     const int pressureKernel = 3;
     const int viscosityKernel = 4;
     const int updatePositionsKernel = 5;
-    
+    const int buildGridKernel = 6;
+
     GPUSort gpuSort;
 
     // State
@@ -141,19 +149,19 @@ public class Simulation3D : MonoBehaviour
         storedVertexIndices = GetTrianglesVertexIndices(cubeMesh);
         //here 
         //comment this rima 
-        //vector3MeshVertices = GetStoredIndicesFromMesh(cubeMesh);
+        vector3MeshVertices = GetStoredIndicesFromMesh(cubeMesh);
 
         //uncomment this rima
 
         //DelaunayTriangulationExample example = new DelaunayTriangulationExample();
-        vector3MeshVertices = DelaunayTriangulationUtility.GetVerticesAfterTriangulate(model , positionsOfModel , scaleOfModel , 0.1f , rotationOfModel);
+       // vector3MeshVertices = DelaunayTriangulationUtility.GetVerticesAfterTriangulate(model , positionsOfModel , scaleOfModel , 0.1f , rotationOfModel);
          float3MeshVertices = ConvertVector3ArrayToFloat3Array(vector3MeshVertices);
 
 
         trianglesBuffer = ComputeHelper.CreateStructuredBuffer<float3>(float3MeshVertices.Length);
           
         trianglesBuffer.SetData(float3MeshVertices);
-        ComputeHelper.SetBuffer(compute, trianglesBuffer, "Triangles", externalForcesKernel, updatePositionsKernel);
+        ComputeHelper.SetBuffer(compute, trianglesBuffer, "Triangles",   updatePositionsKernel , buildGridKernel) ;
         compute.SetFloat("sphereRadius", sphereRadius);
         compute.SetInt("numTriangles", float3MeshVertices.Length );
         particlesShowArray =new int[numParticles];
@@ -163,33 +171,38 @@ public class Simulation3D : MonoBehaviour
 
         //Debug.Log("befoooor");
         positionspointArray = GetDataPositionsPoint(PositionBuffer, numParticles);
-        modelVertices = ThreeDSReader.ReadVertices("C:\\Users\\mayar\\Documents\\GitHub\\Wind-Tunnel-Simulation-in-Unity\\Assets\\models\\SUV_Car\\Models\\1.3DS");
-       foreach (Vector3 vertex in modelVertices)
-        {
-            Debug.Log(vertex);
-        }
+       // modelVertices = ThreeDSReader.ReadVertices("C:\\Users\\mayar\\Documents\\GitHub\\Wind-Tunnel-Simulation-in-Unity\\Assets\\models\\SUV_Car\\Models\\1.3DS");
+       //foreach (Vector3 vertex in modelVertices)
+       // {
+       //     Debug.Log(vertex);
+       // }
         // drow path 
         // Initialize the lists
-        //positionQueues = new List<Queue<float3>>();
-        //lineRenderers = new List<LineRenderer>();
+        positionQueues = new List<Queue<float3>>();
+        lineRenderers = new List<LineRenderer>();
 
         //// Initialize the queues and line renderers for each particle
-        //for (int i = 0; i < positionspointArray.Length / 20; i++)
-        //{
-        //    positionQueues.Add(new Queue<float3>());
+        for (int i = 0; i < positionspointArray.Length / 20; i++)
+        {
+            positionQueues.Add(new Queue<float3>());
 
-        //    LineRenderer lineRenderer = new GameObject("LineRenderer_" + i).AddComponent<LineRenderer>();
-        //    lineRenderer.transform.parent = this.transform;
-        //    lineRenderer.material = new Material(Shader.Find("Sprites/Default"));
-        //    lineRenderer.startColor = lineColor;
-        //    lineRenderer.endColor = lineColor;
-        //    lineRenderer.startWidth = 0.1f;
-        //    lineRenderer.endWidth = 0.1f;
-        //    lineRenderer.positionCount = 0;
+            LineRenderer lineRenderer = new GameObject("LineRenderer_" + i).AddComponent<LineRenderer>();
+           lineRenderer.transform.parent = this.transform;
+            lineRenderer.material = new Material(Shader.Find("Sprites/Default"));
+            lineRenderer.startColor = lineColor;
+            lineRenderer.endColor = lineColor;
+            lineRenderer.startWidth = 0.1f;
+            lineRenderer.endWidth = 0.1f;
+           lineRenderer.positionCount = 0;
 
-        //    lineRenderers.Add(lineRenderer);
-        //}
+            lineRenderers.Add(lineRenderer);
+        }
         //
+        InitializeGrid(compute);
+        ComputeHelper.SetBuffer(compute, Grid, "Grid", externalForcesKernel, updatePositionsKernel, buildGridKernel);
+        ComputeHelper.SetBuffer(compute, NextTriangle, "NextTriangle", externalForcesKernel, updatePositionsKernel, buildGridKernel);
+        ComputeHelper.SetBuffer(compute, TriangleGridIndices, "TriangleGridIndices", externalForcesKernel, updatePositionsKernel, buildGridKernel);
+
 
     }
 
@@ -221,10 +234,13 @@ public class Simulation3D : MonoBehaviour
         HandleInput();
         //mayar var for Collision
         positionspointArray = GetDataPositionsPoint(PositionBuffer, numParticles);
-        //for (int i = 0; i < positionspointArray.Length / 20; i++)
-        //{
-        //    UpdateLineRenderer(i, positionspointArray[i]);
-        //}
+       
+        for (int i = 0; i < positionspointArray.Length / 20; i++)
+        {
+            UpdateLineRenderer(i, positionspointArray[i]);
+        }
+
+        
         //Debug.Log(positionspointArray[1000]);
         //Debug.Log(float3MeshVertices[12]);
         //Debug.Log(float3MeshVertices[13]);
@@ -270,6 +286,7 @@ public class Simulation3D : MonoBehaviour
         ComputeHelper.Dispatch(compute, PositionBuffer.count, kernelIndex: pressureKernel);
         ComputeHelper.Dispatch(compute, PositionBuffer.count, kernelIndex: viscosityKernel);
         ComputeHelper.Dispatch(compute, PositionBuffer.count, kernelIndex: updatePositionsKernel);
+        ComputeHelper.Dispatch(compute, float3MeshVertices.Length, kernelIndex: buildGridKernel);
 
 
     }
@@ -328,7 +345,14 @@ public class Simulation3D : MonoBehaviour
             isPaused = true;
             SetInitialBufferData(spawnData);
         }
-        
+
+        if (Input.GetKeyDown(KeyCode.K))
+        {
+            showLines = !showLines;
+            
+        }
+
+
     }
 
     private float3[] GetDataPositionsPoint(ComputeBuffer buffer, int count)
@@ -415,33 +439,68 @@ public class Simulation3D : MonoBehaviour
 
     }
 
-    //void UpdateLineRenderer(int index, float3 currentPosition)
-    //{
-    //    // Get the queue for the current particle
-    //    Queue<float3> positionsQueue = positionQueues[index];
+    void UpdateLineRenderer(int index, float3 currentPosition)
+    {
+        // Get the queue for the current particle
+        Queue<float3> positionsQueue = positionQueues[index];
 
-    //    // Add the new position to the queue if it has moved significantly
-    //    if (positionsQueue.Count == 0 || math.distance(currentPosition, positionsQueue.Peek()) > 0.1f)
-    //    {
-    //        positionsQueue.Enqueue(currentPosition);
+        // Add the new position to the queue if it has moved significantly
+        if (positionsQueue.Count == 0 || math.distance(currentPosition, positionsQueue.Peek()) > 0.1f)
+        {
+            positionsQueue.Enqueue(currentPosition);
 
-    //        // If the queue exceeds the maximum number of positions, remove the oldest
-    //        if (positionsQueue.Count > maxPositions)
-    //        {
-    //            positionsQueue.Dequeue();
-    //        }
+            // If the queue exceeds the maximum number of positions, remove the oldest
+            if (positionsQueue.Count > maxPositions)
+            {
+                positionsQueue.Dequeue();
+            }
 
-    //        // Update the LineRenderer
-    //        LineRenderer lineRenderer = lineRenderers[index];
-    //        lineRenderer.positionCount = positionsQueue.Count;
-    //        Vector3[] positionsArray = new Vector3[positionsQueue.Count];
-    //        int i = 0;
-    //        foreach (var pos in positionsQueue)
-    //        {
-    //            positionsArray[i++] = new Vector3(pos.x, pos.y, pos.z);
-    //        }
-    //        lineRenderer.SetPositions(positionsArray);
-    //    }
-    //}
+            // Update the LineRenderer
+            LineRenderer lineRenderer = lineRenderers[index];
+            lineRenderer.positionCount = positionsQueue.Count;
+            Vector3[] positionsArray = new Vector3[positionsQueue.Count];
+            int i = 0;
+            foreach (var pos in positionsQueue)
+            {
+                positionsArray[i++] = new Vector3(pos.x, pos.y, pos.z);
+            }
+            lineRenderer.SetPositions(positionsArray);
+
+        }
+        
+    }
+    void InitializeGrid(ComputeShader computeShader)
+    {
+        // Calculate the number of grid cells based on your scene bounds and grid cell size
+        int numGridCells = 50; // Determine based on your specific scene bounds and grid cell size
+
+        // Create and initialize buffers for the grid
+        computeShader.SetInt("numGridCells", numGridCells);
+          Grid = new ComputeBuffer(numGridCells, sizeof(uint));
+        NextTriangle = new ComputeBuffer(float3MeshVertices.Length, sizeof(uint));
+        TriangleGridIndices = new ComputeBuffer(float3MeshVertices.Length, sizeof(uint));
+
+        // Initialize grid data with sentinel values
+        int[] gridData = new int[numGridCells];
+        int[] nextTriangleData = new int[float3MeshVertices.Length];
+        for (int i = 0; i < numGridCells; ++i) gridData[i] = float3MeshVertices.Length;
+        for (int i = 0; i < float3MeshVertices.Length; ++i) nextTriangleData[i] = float3MeshVertices.Length;
+
+        Grid.SetData(gridData);
+        NextTriangle.SetData(nextTriangleData);
+
+        // Set buffers to the compute shader
+       
+        //computeShader.SetBuffer(buildGridKernel , "Grid", Grid);
+        //computeShader.SetBuffer(buildGridKernel, "NextTriangle", NextTriangle);
+        //computeShader.SetBuffer(buildGridKernel, "TriangleGridIndices", TriangleGridIndices);
+
+        // Dispatch the kernel to build the grid
+       
+
+        // int numGroups = Mathf.CeilToInt(float3MeshVertices.Length / (float)64);
+        // computeShader.Dispatch(buildGridKernel, numGroups, 1, 1);
+    }
+
 
 }

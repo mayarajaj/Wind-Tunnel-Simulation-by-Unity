@@ -5,11 +5,23 @@
 #pragma kernel CalculateViscosity
 #pragma kernel UpdatePositions
 
+#pragma kernel BuildGrid
+
 // Includes
 #include "./FluidMaths3D.hlsl"
 #include "./SpatialHash3D.hlsl"
 
 static const int NumThreads = 64;
+
+//struct
+
+//struct GridCell
+//{
+//    uint particleCount;
+//    uint triangleCount;
+//    uint particleIndices[128];
+//    uint triangleIndices[128];
+//};
 
 // Buffers
 RWStructuredBuffer<float3> Positions;
@@ -20,6 +32,7 @@ RWStructuredBuffer<uint3> SpatialIndices; // used for spatial hashing
 RWStructuredBuffer<uint> SpatialOffsets; // used for spatial hashing
 StructuredBuffer<float3> Triangles;
 RWStructuredBuffer<int> ParticlesShow ;
+//RWStructuredBuffer<GridCell> Grid;
 
 // Settings
 const uint numParticles;
@@ -49,6 +62,93 @@ const float interactionInputStrength;
 const float interactionInputRadius;
 const uint numTriangles;
 const float sphereRadius;
+const int numGridCells;
+const float CollisionOffset = 0.03f; // Offset to move particle away from collision surface
+const float DragCoefficient = 0.1f; // Coefficient for drag force
+const float LiftCoefficient = 0.05f; // Coefficient for lift force
+//const float gridCellSize = 1.0;
+
+//grid 
+
+// Fluid Simulation Compute Shader with Uniform Grid
+
+#pragma kernel BuildGrid
+
+#include "C:\Program Files\Unity\Hub\Editor\2022.3.20f1\Editor\Data\CGIncludes\UnityCG.cginc"
+
+// Define the size of the grid cells
+const float gridCellSize = 1.0;
+
+// Grid data structures
+RWStructuredBuffer<uint> Grid; // Stores the indices of the first triangle in each grid cell
+RWStructuredBuffer<uint> NextTriangle; // Stores the next triangle index for each triangle
+RWStructuredBuffer<uint> TriangleGridIndices; // Stores the grid cell index for each triangle
+
+// Number of particles and triangles
+
+
+
+
+[numthreads(NumThreads, 1, 1)]
+void BuildGrid(uint3 id : SV_DispatchThreadID)
+{
+    // Ensure we don't go out of bounds
+    if (id.x >= numTriangles / 3)
+        return;
+
+    uint triangleIndex = id.x * 3;
+
+    // Get vertices of the triangle
+    float3 A = Triangles[triangleIndex];
+    float3 B = Triangles[triangleIndex + 1];
+    float3 C = Triangles[triangleIndex + 2];
+
+    // Calculate the bounding box of the triangle
+    float3 minPoint = min(A, min(B, C));
+    float3 maxPoint = max(A, max(B, C));
+
+    // Calculate the grid cell indices of the bounding box
+    int3 minCell = int3(floor(minPoint / gridCellSize));
+    int3 maxCell = int3(floor(maxPoint / gridCellSize));
+
+    // Iterate through all grid cells the triangle intersects
+    for (int z = minCell.z; z <= maxCell.z; ++z)
+    {
+        for (int y = minCell.y; y <= maxCell.y; ++y)
+        {
+            for (int x = minCell.x; x <= maxCell.x; ++x)
+            {
+                int3 cellIndex = int3(x, y, z);
+                // Hash the cell index to get a unique grid key
+                uint hash = HashCell3D(cellIndex);
+                // Convert the hash to a key within the range of grid size
+                uint key = KeyFromHash(hash, numGridCells);
+
+                // Insert the triangle into the grid cell
+                uint oldHead = Grid[key];
+                Grid[key] = triangleIndex;
+                NextTriangle[triangleIndex] = oldHead;
+                TriangleGridIndices[triangleIndex] = key;
+            }
+        }
+    }
+}
+// Hash function for 3D cell index
+
+
+
+
+int3 GetCellIndex(float3 position, float cellSize, int gridResolution)
+{
+    return int3(
+        floor(position.x / cellSize),
+        floor(position.y / cellSize),
+        floor(position.z / cellSize)
+    );
+}
+
+
+//
 
 // Mayar
 float distanceToSegmentSquared(float3 point1, float3 v, float3 w)
@@ -64,7 +164,8 @@ float distanceToSegmentSquared(float3 point1, float3 v, float3 w)
     -projection);
 }
 
-bool IsSphereIntersectingTriangle(float3 sphereCenter, float radius, float3 A, float3 B, float3 C)
+
+bool IsSphereIntersectingTriangle(float3 sphereCenter, float radius,     float3 A, float3 B, float3 C)
 {
     // Edge vectors
     float3 AB = B - A;
@@ -125,14 +226,24 @@ bool IsSphereIntersectingTriangle(float3 sphereCenter, float radius, float3 A, f
     return false;
 }
 
-bool IsSphereIntersecting(float3 sphereCenter, float radius, uint numTriangles, StructuredBuffer<float3> triangles)
+bool IsSphereIntersecting(float3 sphereCenter, float radius)
 {
-    for (uint i = 0; i < numTriangles; i += 3)
+    // Calculate the grid cell index for the sphere center
+    int3 cellIndex = int3(floor(sphereCenter / gridCellSize));
+    // Hash the cell index to get a unique grid key
+    uint hash = HashCell3D(cellIndex);
+    // Convert the hash to a key within the range of grid size
+    uint key = KeyFromHash(hash, numTriangles);
+
+    // Iterate through the triangles in the grid cell
+    uint triangleIndex = Grid[key];
+    while (triangleIndex != numTriangles) // numTriangles is used as a sentinel value
     {
-        if (IsSphereIntersectingTriangle(sphereCenter, radius, triangles[i], triangles[i + 1], triangles[i + 2]))
+        if (IsSphereIntersectingTriangle(sphereCenter, radius, Triangles[triangleIndex], Triangles[triangleIndex + 1], Triangles[triangleIndex + 2]))
         {
             return true;
         }
+        triangleIndex = NextTriangle[triangleIndex];
     }
     return false;
 }
@@ -170,7 +281,9 @@ void ResolveCollisions(uint particleIndex)
     // Get the sphere center for the current particle
     float3 sphereCenter = Positions[particleIndex];
     // Check for intersections with triangles
-    bool intersects = IsSphereIntersecting(sphereCenter, sphereRadius, numTriangles, Triangles);
+    
+    
+    bool intersects = IsSphereIntersecting(sphereCenter, sphereRadius);
 
     // Reflect velocity and apply damping if intersection detected
    // Resolve aerodynamic collision
@@ -192,7 +305,7 @@ void ResolveCollisions(uint particleIndex)
           // Update the velocity
         velocityLocal += lift + drag;
           
-          // Optionally, update the position slightly to avoid sticking to the surface
+         // Optionally, update the position slightly to avoid sticking to the surface
         posLocal += normal * 0.03f; // Small offset to move it away from the surface
         ParticlesShow[particleIndex] = 1;
         Positions[particleIndex] = mul(localToWorld, float4(posLocal, 1)).xyz;
