@@ -51,5 +51,9 @@
         "temp/": true,
         "Temp/": true
     },
+<<<<<<< HEAD
     "dotnet.defaultSolution": "Wind-Tunnel-Simulation-by-Unity-main.sln"
+=======
+    "dotnet.defaultSolution": "Wind-Tunnel-Simulation-in-Unity.sln"
+>>>>>>> origin/main
 }

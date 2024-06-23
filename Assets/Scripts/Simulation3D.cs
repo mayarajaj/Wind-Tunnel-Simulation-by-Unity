@@ -147,9 +147,13 @@ public class Simulation3D : MonoBehaviour
 
         //DelaunayTriangulationExample example = new DelaunayTriangulationExample();
         vector3MeshVertices = DelaunayTriangulationUtility.GetVerticesAfterTriangulate(model , positionsOfModel , scaleOfModel , 0.1f , rotationOfModel);
+<<<<<<< HEAD
         float3MeshVertices = ConvertVector3ArrayToFloat3Array(vector3MeshVertices);
 
 
+=======
+         float3MeshVertices = ConvertVector3ArrayToFloat3Array(vector3MeshVertices);
+>>>>>>> origin/main
 
 
         trianglesBuffer = ComputeHelper.CreateStructuredBuffer<float3>(float3MeshVertices.Length);
@@ -165,11 +169,19 @@ public class Simulation3D : MonoBehaviour
 
         //Debug.Log("befoooor");
         positionspointArray = GetDataPositionsPoint(PositionBuffer, numParticles);
+<<<<<<< HEAD
     //     modelVertices = ThreeDSReader.ReadVertices("C:\\Users\\mayar\\Documents\\GitHub\\Wind-Tunnel-Simulation-in-Unity\\Assets\\models\\SUV_Car\\Models\\1.3DS");
     //    foreach (Vector3 vertex in modelVertices)
     //     {
     //         Debug.Log(vertex);
     //     }
+=======
+        modelVertices = ThreeDSReader.ReadVertices("C:\\Users\\mayar\\Documents\\GitHub\\Wind-Tunnel-Simulation-in-Unity\\Assets\\models\\SUV_Car\\Models\\1.3DS");
+       foreach (Vector3 vertex in modelVertices)
+        {
+            Debug.Log(vertex);
+        }
+>>>>>>> origin/main
         // drow path 
         // Initialize the lists
         //positionQueues = new List<Queue<float3>>();
@@ -380,6 +392,13 @@ public class Simulation3D : MonoBehaviour
            // Debug.Log($"the Vertex {i} is {vertex1} after");
 
 
+<<<<<<< HEAD
+=======
+
+
+
+
+>>>>>>> origin/main
         }
         return verticesSorted;
     }
@@ -397,8 +416,11 @@ public class Simulation3D : MonoBehaviour
     }
 
 
+<<<<<<< HEAD
 
 
+=======
+>>>>>>> origin/main
     void OnDestroy()
     {
         ComputeHelper.Release(PositionBuffer, predictedPositionsBuffer, VelocityBuffer, DensityBuffer, spatialIndices, spatialOffsets , trianglesBuffer);
